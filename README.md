@@ -26,7 +26,8 @@ MCP 服务器本质上是一个由宿主启动的进程：
 | `drop_whoami` | 检查 Key 是否可用，返回账号、Key scopes 和限制 | 只读 |
 | `drop_list_projects` | 按名称/slug 搜索项目，支持分页和排序 | 只读 |
 | `drop_get_project` | 按 `projectId` 或 `slug` 获取项目及文件 | 只读 |
-| `drop_publish_site` | 创建或部署静态站点，返回公开 URL | 写入 |
+| `drop_publish_site` | 创建静态站点，返回公开 URL；复用已有 slug 时兼容更新 | 写入 |
+| `drop_update_site` | 更新一个已存在的项目，返回公开 URL | 写入 |
 
 建议发布前先调用一次 `drop_whoami`，确认 Key 具备：
 
@@ -140,6 +141,30 @@ startup_timeout_sec = 20
 
 `path` 必须位于 `DROP_ALLOWED_ROOTS` 中。建议始终使用绝对路径，因为相对路径会相对于 MCP 服务器进程的当前目录解析。
 
+### 更新已有站点
+
+更新站点时调用 `drop_update_site`，并继续使用原来的 `slug`。它会复用已有项目并
+原子替换完整文件快照，结果中的 `action` 为 `deployed`。该工具不会创建新项目：
+如果 slug 不存在，会返回 `project_not_found`。已有项目的名称、可见性和启用状态
+不会改变。
+
+```json
+{
+  "slug": "my-site",
+  "path": "/Users/micropue/Desktop/MICROPUE服务中心/my-site/dist",
+  "message": "update site"
+}
+```
+
+因此，模型应按用户意图区分：
+
+- 用户说“更新”“重新部署”或“修改已有站点”时，调用 `drop_update_site`；若不知道
+  `slug`，先用 `drop_list_projects` 搜索或 `drop_get_project` 查询。
+- 用户明确要求创建一个独立的新项目时，调用 `drop_publish_site` 并使用新的 `slug`。
+
+`drop_publish_site` 为兼容旧调用仍支持复用已有 `slug`，但模型面对已有站点时应优先
+选择语义更明确的 `drop_update_site`。
+
 ### 使用内联文件
 
 ```json
@@ -178,6 +203,7 @@ startup_timeout_sec = 20
 
 - 如果 slug 不存在，先 `POST /projects` 创建项目和首个部署。
 - 如果 slug 已存在，用 `POST /projects/{id}/deploy` 原子替换文件；旧快照在失败时保持不变。
+- `drop_update_site` 要求项目已存在；slug 不存在时返回 `project_not_found`，不会创建新项目。
 - 已有项目通过 `If-Match: "rev-N"` 做乐观并发控制。
 - 遇到 `412 revision_conflict` 时重新读取项目并重试一次。
 - 创建时遇到 `409` 会重新按 slug 查询，以处理并发创建竞争。

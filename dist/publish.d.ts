@@ -5,6 +5,7 @@ export interface PublishSiteInput {
     name: string;
     message?: string;
     snapshot: SiteSnapshot;
+    requireExisting?: boolean;
 }
 export interface PublishSiteResult {
     url: string;

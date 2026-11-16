@@ -59,6 +59,11 @@ export async function publishSite(client, input) {
         warnings.push(`已跳过不支持的文件：${preview}${suffix}`);
     }
     let existing = await client.findProjectBySlug(input.slug);
+    if (!existing && input.requireExisting) {
+        throw new DropMcpError('project_not_found', `未找到 slug 为 "${input.slug}" 的项目。`, {
+            hint: '请先调用 drop_list_projects 或 drop_get_project 确认 slug；首次发布请使用 drop_publish_site。'
+        });
+    }
     let action = existing ? 'deployed' : 'created';
     if (!existing) {
         try {

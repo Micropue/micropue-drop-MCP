@@ -128,7 +128,8 @@ describe('publishSite', () => {
     const result = await publishSite(fake.client, {
       slug: 'demo',
       name: 'Ignored for existing projects',
-      snapshot: snapshot()
+      snapshot: snapshot(),
+      requireExisting: true
     })
 
     expect(result.action).toBe('deployed')
@@ -138,6 +139,25 @@ describe('publishSite', () => {
       3,
       expect.objectContaining({ folders: ['assets'] })
     )
+  })
+
+  it('refuses to create a missing project when an existing project is required', async () => {
+    const fake = fakeClient()
+    fake.findProjectBySlug.mockResolvedValue(null)
+
+    await expect(publishSite(fake.client, {
+      slug: 'missing',
+      name: 'Missing',
+      snapshot: snapshot(),
+      requireExisting: true
+    })).rejects.toMatchObject({
+      code: 'project_not_found',
+      message: '未找到 slug 为 "missing" 的项目。',
+      hint: expect.stringContaining('drop_publish_site')
+    })
+
+    expect(fake.createProject).not.toHaveBeenCalled()
+    expect(fake.deployProject).not.toHaveBeenCalled()
   })
 
   it('re-reads a concurrently created project after a 409', async () => {

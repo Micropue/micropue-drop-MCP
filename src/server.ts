@@ -12,7 +12,7 @@ import {
 } from './site.js'
 
 const SERVER_NAME = 'drop-mcp'
-const SERVER_VERSION = '0.1.0'
+const SERVER_VERSION = '0.1.4'
 
 export interface PublishEnvironment {
   allowedRoots: string[]
@@ -91,12 +91,27 @@ function slugInput(): z.ZodString {
   return z.string()
     .min(1)
     .max(40)
-    .describe('DROP 项目 slug，1–40 位小写字母、数字或连字符；大写会自动转小写。')
+    .describe(
+      'DROP 项目 slug，1–40 位小写字母、数字或连字符；大写会自动转小写。' +
+      '传入已有 slug 会更新该项目的全部文件，不会创建重复项目；更新站点时应继续使用原 slug。'
+    )
+}
+
+function siteSourceInput() {
+  return {
+    path: z.string().min(1).optional().describe('Local directory containing the deployable static output. Must be under DROP_ALLOWED_ROOTS.'),
+    files: z.array(z.object({
+      path: z.string().min(1).max(120),
+      content: z.string()
+    })).min(1).max(20).optional().describe('Inline project files, used instead of path.'),
+    ignoreUnsupported: z.boolean().optional().describe('When publishing a directory, explicitly skip unsupported regular files instead of failing. Defaults to false.'),
+    message: z.string().max(200).optional().describe('Optional deployment message.')
+  }
 }
 
 function publishText(result: PublishSiteResult): string {
   const lines = [
-    result.action === 'created' ? '已创建并发布静态站点。' : '静态站点已部署。',
+    result.action === 'created' ? '已创建并发布静态站点。' : '已更新并部署已有静态站点。',
     `公开地址: ${result.url}`,
     `项目 ID: ${result.projectId}`,
     `slug: ${result.slug}`,
@@ -128,6 +143,54 @@ function normalizeMessage(raw: string | undefined): string | undefined {
   if (!message) return undefined
   if (message.length > 200) throw inputError('部署说明不能超过 200 个字符。')
   return message
+}
+
+interface SitePublishToolInput {
+  slug: string
+  name?: string | undefined
+  path?: string | undefined
+  files?: Array<{ path: string; content: string }> | undefined
+  ignoreUnsupported?: boolean | undefined
+  message?: string | undefined
+}
+
+async function executeSitePublish(
+  runtime: DropRuntime,
+  input: SitePublishToolInput,
+  requireExisting: boolean
+): Promise<CallToolResult> {
+  try {
+    const sources = Number(Boolean(input.path)) + Number(Boolean(input.files))
+    if (sources !== 1) {
+      throw inputError('path 和 files 必须且只能提供一个。')
+    }
+
+    const slug = normalizeSlug(input.slug)
+    let snapshot: SiteSnapshot
+    if (input.path) {
+      const environment = runtime.getPublishEnvironment()
+      snapshot = await loadDirectorySnapshot({
+        sourcePath: input.path,
+        allowedRoots: environment.allowedRoots,
+        cwd: environment.cwd,
+        ignoreUnsupported: input.ignoreUnsupported ?? false
+      })
+    } else {
+      snapshot = createSiteSnapshot(input.files ?? [])
+    }
+
+    const message = normalizeMessage(input.message)
+    const result = await publishSite(runtime.getClient(), {
+      slug,
+      name: requireName(input.name, slug),
+      ...(message === undefined ? {} : { message }),
+      snapshot,
+      requireExisting
+    })
+    return success(publishText(result), { ok: true, ...result })
+  } catch (error) {
+    return failure(error)
+  }
 }
 
 export function createDropMcpServer(runtime: DropRuntime = createDefaultRuntime()): McpServer {
@@ -237,23 +300,22 @@ export function createDropMcpServer(runtime: DropRuntime = createDefaultRuntime(
   server.registerTool(
     'drop_publish_site',
     {
-      title: 'Publish a static site to DROP',
+      title: 'Create a static site on DROP',
       description: [
-        'Create or atomically replace a DROP static-site project by slug, then return its public URL.',
+        'Create a new public DROP static-site project from a local directory or inline files, then return its public URL.',
+        'For backward compatibility, passing an existing slug updates that project and returns action="deployed"; however, prefer drop_update_site when the user explicitly asks to update or redeploy an existing site.',
+        'When creating a separate project, choose a new unused slug.',
         'Provide exactly one source: path (a local directory restricted by DROP_ALLOWED_ROOTS) or files (inline path/content pairs).',
         'DROP accepts only .html, .css, and .js files: at most 20 files, 512 KiB per file, and 1 MiB total.',
         'Existing projects are deployed with optimistic concurrency (If-Match) and one conflict retry.'
       ].join(' '),
       inputSchema: z.object({
         slug: slugInput(),
-        name: z.string().min(1).max(80).optional().describe('Project name used only when creating a new project. Defaults to the slug.'),
-        path: z.string().min(1).optional().describe('Local directory containing the deployable static output. Must be under DROP_ALLOWED_ROOTS.'),
-        files: z.array(z.object({
-          path: z.string().min(1).max(120),
-          content: z.string()
-        })).min(1).max(20).optional().describe('Inline project files, used instead of path.'),
-        ignoreUnsupported: z.boolean().optional().describe('When publishing a directory, explicitly skip unsupported regular files instead of failing. Defaults to false.'),
-        message: z.string().max(200).optional().describe('Optional deployment message.')
+        name: z.string().min(1).max(80).optional().describe(
+          'Project name used only when creating a new project. Defaults to the slug. ' +
+          'When an existing slug is reused for an update, the existing project name is kept.'
+        ),
+        ...siteSourceInput()
       }),
       annotations: {
         readOnlyHint: false,
@@ -262,39 +324,37 @@ export function createDropMcpServer(runtime: DropRuntime = createDefaultRuntime(
         openWorldHint: true
       }
     },
-    async input => {
-      try {
-        const sources = Number(Boolean(input.path)) + Number(Boolean(input.files))
-        if (sources !== 1) {
-          throw inputError('path 和 files 必须且只能提供一个。')
-        }
+    async input => executeSitePublish(runtime, input, false)
+  )
 
-        const slug = normalizeSlug(input.slug)
-        let snapshot: SiteSnapshot
-        if (input.path) {
-          const environment = runtime.getPublishEnvironment()
-          snapshot = await loadDirectorySnapshot({
-            sourcePath: input.path,
-            allowedRoots: environment.allowedRoots,
-            cwd: environment.cwd,
-            ignoreUnsupported: input.ignoreUnsupported ?? false
-          })
-        } else {
-          snapshot = createSiteSnapshot(input.files ?? [])
-        }
-
-        const message = normalizeMessage(input.message)
-        const result = await publishSite(runtime.getClient(), {
-          slug,
-          name: requireName(input.name, slug),
-          ...(message === undefined ? {} : { message }),
-          snapshot
-        })
-        return success(publishText(result), { ok: true, ...result })
-      } catch (error) {
-        return failure(error)
+  server.registerTool(
+    'drop_update_site',
+    {
+      title: 'Update an existing static site on DROP',
+      description: [
+        'Update an existing DROP static-site project identified by slug, then return its public URL.',
+        'Always pass the exact existing slug. The complete file snapshot is atomically replaced and the tool returns action="deployed"; it never creates a new project.',
+        'If the slug is unknown, first use drop_list_projects or drop_get_project to discover it. If no project exists, use drop_publish_site to create one.',
+        'The existing project name, visibility, and enabled state are not changed.',
+        'Provide exactly one source: path (a local directory restricted by DROP_ALLOWED_ROOTS) or files (inline path/content pairs).',
+        'DROP accepts only .html, .css, and .js files: at most 20 files, 512 KiB per file, and 1 MiB total.',
+        'Updates use optimistic concurrency (If-Match) and one conflict retry.'
+      ].join(' '),
+      inputSchema: z.object({
+        slug: slugInput().describe(
+          '要更新的已有 DROP 项目 slug，1–40 位小写字母、数字或连字符；大写会自动转小写。' +
+          '必须传入已存在的 slug；如果不知道 slug，先用 drop_list_projects 或 drop_get_project 查询。'
+        ),
+        ...siteSourceInput()
+      }),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true
       }
-    }
+    },
+    async input => executeSitePublish(runtime, input, true)
   )
 
   return server
