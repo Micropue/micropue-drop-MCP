@@ -236,25 +236,67 @@ npm run build
 
 ## npm 自动发布
 
-`.github/workflows/build-publish.yml` 会在以下场景运行：
+`.github/workflows/build-publish.yml` 只会在推送 `v*` 标签时运行。工作流通过
+GitHub Actions OIDC 使用 npm Trusted Publishing 发布，不需要 `NPM_TOKEN`，并会自动生成
+npm provenance。
 
-- 推送 `v*` 标签，例如 `v0.1.0`
-- 在 GitHub Actions 页面手动运行 `workflow_dispatch`
+### 第一次手动发布
 
-工作流会执行测试与构建、生成 npm tarball、上传 GitHub Actions artifact，然后发布到 npm。
+npm 必须先存在至少一个已发布版本，包设置页才会提供 Trusted Publisher 配置入口。
+因此第一次发布必须在本地手动完成。首次手动发布的版本是 `0.1.1`。
 
-首次使用前：
-
-1. 在 npm 账号下创建可发布 `@micropue` scope 的 Granular Access Token，并按 CI 发布需要配置 2FA 绕过权限。
-2. 在 GitHub 仓库的 `Settings > Secrets and variables > Actions` 中添加名为 `NPM_TOKEN` 的 Repository secret。
-3. 推送代码后，推送与 `package.json` 版本一致的标签：
+1. 提交并推送准备发布的代码到 `main`。首次手动发布不需要推送 Git 标签。
+2. 登录 npm 并确认当前用户：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+npm login
+npm whoami
 ```
 
-工作流会拒绝版本与标签不一致、或 npm 上已存在的同版本包。手动运行时，也会发布当前 `package.json` 中的版本。包以公开 scoped 包形式发布；公开仓库会启用 npm provenance，私有仓库会自动跳过 provenance。
+3. 在仓库根目录执行首次发布：
+
+```bash
+npm publish --access public
+```
+
+开启 npm 2FA 时，命令可能需要一次性验证码：
+
+```bash
+npm publish --access public --otp=123456
+```
+
+### 配置 Trusted Publisher
+
+首次发布成功后，在 npmjs.com 打开 `@micropue/drop-mcp` 的包设置，找到
+`Trusted Publisher`，选择 `GitHub Actions`，并严格按以下值填写：
+
+| 字段 | 值 |
+| --- | --- |
+| Organization or user | `Micropue` |
+| Repository | `micropue-drop-MCP` |
+| Workflow filename | `build-publish.yml` |
+| Environment name | 留空 |
+| Allowed actions | 勾选 `Allow npm publish` |
+
+这些字段区分大小写，必须与 GitHub 仓库完全一致。新建的 Trusted Publisher 配置需要在
+2 天内完成一次成功发布，否则会过期。因此配置完成后应尽快发布下一个版本。
+
+### 后续自动发布
+
+不要复用或移动已经存在的标签。先把 `package.json` 和 `package-lock.json` 中的版本改成
+一个从未使用过的新版本，例如 `0.1.2`，提交并推送代码，然后创建并推送同名标签：
+
+```bash
+npm version 0.1.2 --no-git-tag-version
+git add package.json package-lock.json
+git commit -m "release: v0.1.2"
+git push origin main
+git tag v0.1.2
+git push origin v0.1.2
+```
+
+工作流会执行测试与构建、生成 npm tarball、上传 GitHub Actions artifact，然后通过 OIDC
+发布到 npm。工作流会拒绝版本与标签不一致、或 npm 上已存在的同版本包。
 
 ## 常见错误
 

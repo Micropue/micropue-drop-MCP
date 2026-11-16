@@ -1,10 +1,14 @@
 {
   "name": "@micropue/drop-mcp",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "MCP server for publishing static sites to DROP",
   "license": "MIT",
   "author": "micropue",
   "homepage": "https://drop.micropue.com.cn",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Micropue/micropue-drop-MCP.git"
+  },
   "keywords": [
     "mcp",
     "model-context-protocol",
