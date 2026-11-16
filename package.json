@@ -1,0 +1,52 @@
+{
+  "name": "@micropue/drop-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for publishing static sites to DROP",
+  "license": "MIT",
+  "author": "micropue",
+  "homepage": "https://drop.micropue.com.cn",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "drop",
+    "static-site",
+    "deploy",
+    "publisher"
+  ],
+  "type": "module",
+  "bin": {
+    "drop-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "npm run typecheck && npm test && npm run build",
+    "dev": "tsx src/index.ts",
+    "inspector": "npx @modelcontextprotocol/inspector node dist/index.js",
+    "prepack": "npm run build",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
